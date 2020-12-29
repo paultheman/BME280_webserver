@@ -74,10 +74,10 @@ static const char alphanum[] ="0123456789"
                               "abcdefghijklmnopqrstuvwxyz";  // For random generation of client ID.
 PubSubClient mqttClient(ethClient); // Initialize the PubSubClient library.
 const char* mqttServer = "mqtt.thingspeak.com"; 
-unsigned long lastConnectionTime = 0; 
-const unsigned long postingInterval = 15L * 1000L; // Post data every 15 seconds
-unsigned long mqttLoopTime = 0;
-unsigned long mqttLoopDelay = 1000;
+unsigned long lastConnectionTime = 0L; 
+const unsigned long postingInterval = 20L * 1000L; // Post data every 20 seconds
+unsigned long mqttLoopTime = 0L;
+unsigned long mqttLoopDelay = 1000L;
 
 // OLED print settings
 // -------------------
@@ -86,18 +86,18 @@ unsigned long mqttLoopDelay = 1000;
 //  Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
 #define OLED_RESET    -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-unsigned long displayNow = 0;
-unsigned long displayDelay = 8000;
+unsigned long displayNow = 0L;
+unsigned long displayDelay = 8000L;
 
 // Serial print settings
 // --------------------
-unsigned long serial_time_now = 0;
-unsigned long serial_delay = 2000; // Serial print delay;
+unsigned long serial_time_now = 0L;
+unsigned long serial_delay = 2000L; // Serial print delay;
 
 // mqtt reconnect function
 // -----------------------
-unsigned long mqttReconnectTime = 0;
-unsigned long mqttReconnectInterval = 5000;
+unsigned long mqttReconnectTime = 0L;
+unsigned long mqttReconnectInterval = 5000L;
 
 void reconnectMqtt() 
 {
