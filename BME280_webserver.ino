@@ -212,7 +212,6 @@ void webServer()
 
 void setup()
 {
-  randomSeed(analogRead(0));   //initializes the pseudo-random number generator based on noise from A0 analog pin
   Serial.begin(115200);
 
   // Initialize Ethernet
