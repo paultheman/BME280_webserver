@@ -4,7 +4,7 @@
 - Ethernet shield
 - BME280 using I2C
 - OLED 128x64 screen using I2C
-- Data is uploaded to ThingSpeak using MQTT protocol
+- Data is uploaded to ThingSpeak using MQTT 3.1.1 protocol
 
 ### Highlights
  
@@ -40,30 +40,28 @@ Arduino    |   3.3 V  | GND |  20 | 21
     - [Adafruit SSD1306](https://github.com/adafruit/Adafruit_SSD1306.git)
     - [Base64](https://github.com/agdl/Base64.git)
     - [Ethernet](https://github.com/PaulStoffregen/Ethernet.git)
-    - [PubSubClient](https://github.com/knolleary/pubsubclient.git)
+    - [MQTT](https://github.com/256dpi/arduino-mqtt)
     - [SD](https://github.com/adafruit/SD.git)
 
 - If you use **PlatformIO** place the following lines in your platformio.ini file and all required libraries will be installed.
 ```ini
 lib_deps = 
-    Ethernet
-    Adafruit BME280 Library
-    161 ; SD library
-    PubSubClient
+    arduino-libraries/Ethernet @ ^2.0.0
+    adafruit/Adafruit BME280 Library @ ^2.2.2
+    arduino-libraries/SD @ ^1.2.4
     agdl/Base64 @ ^1.0.0
-    Adafruit GFX Library
-	Adafruit SSD1306
+    adafruit/Adafruit GFX Library @ ^1.10.14
+	adafruit/Adafruit SSD1306 @ ^2.5.3
     adafruit/Adafruit BusIO @ ^1.5.0
+    256dpi/MQTT @ ^2.5.0
 ```
+- You will need to overwrite the mqtt_secrets.h with the ones obtained from ThinkgSpeak, Devices, MQTT
 - Edit the arduino code with your login details and channel information:
 ```cpp
-char mqttUserName[] = "ArduinoMQTT";           // Use any name.
-char mqttPass[] = "PNFR1X3LA5D1M8XU";      // Change to your MQTT API Key from Account > MyProfile.   
-char writeAPIKey[] = "DEKBK8CCMXMS4STX";    // Change to your channel write API key.
 long channelID = 871658;                    // Change to your channel ID.
 ```
 ```cpp
-char userAndPassword[] = "user:password";
+char userAndPassword[] = "admin:admin";
 ```
 
 ### The Ethernet shield

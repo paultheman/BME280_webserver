@@ -21,10 +21,10 @@
                 https://github.com/agdl/Base64.git
               - Ethernet
                 https://github.com/PaulStoffregen/Ethernet.git
-              - PubSubClient
-                https://github.com/knolleary/pubsubclient.git
+              - MQTT
+                https://github.com/256dpi/arduino-mqtt
               - SD 
-                https://github.com/adafruit/SD.git
+                https://github.com/arduino-libraries/SD
               - SPI, and Wire libraries (included with the Arduino IDE)
 
   References: - BME280 datasheet: 
@@ -34,9 +34,9 @@
               - 0,96 OLED screen datasheet:
                 http://web.eng.fiu.edu/watsonh/IntroMicros/M14-I2C/ER-OLED0.96-1_Series_Datasheet.pdf
               - ThingSpeak MQTT API: 
-                https://www.mathworks.com/help/thingspeak/use-arduino-client-to-publish-to-a-channel.html
+                https://www.mathworks.com/help/thingspeak/mqtt-api.html?s_tid=CRUX_lftnav
 
-  Date:         September 21, 2020
+  Date:         April 16, 2022
 
   Author:       P. Dinu
   ------------------------------------------------------------------------------*/
@@ -47,11 +47,12 @@
 #include <Adafruit_SSD1306.h>
 #include <Base64.h>
 #include <Ethernet.h>
-#include <PubSubClient.h>
+#include <MQTT.h>
 #include <SD.h>
 #include <SPI.h>
 #include <Wire.h>
 #include <Fonts/FreeSans9pt7b.h>
+#include <mqtt_secrets.h>
 
 // BME280
 // ------
@@ -64,20 +65,18 @@ byte mac[] = {  0x00, 0xAA, 0xBB, 0xCC, 0xDE, 0x02 };
 EthernetClient ethClient;
 
 // ThingSpeak settings
-// -------------------
-char mqttUserName[] = "ArduinoMQTT";           // Use any name.
-char mqttPass[] = "DEKBK8CCMXMS4STX";      // Change to your MQTT API Key from Account > MyProfile.   
-char writeAPIKey[] = "PNFR1X3LA5D1M8XU";    // Change to your channel write API key.
-long channelID = 871658;                    // Change to your channel ID.
-static const char alphanum[] ="0123456789"
-                              "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                              "abcdefghijklmnopqrstuvwxyz";  // For random generation of client ID.
-PubSubClient mqttClient(ethClient); // Initialize the PubSubClient library.
-const char* mqttServer = "mqtt.thingspeak.com"; 
+// ------------------
+char mqttClientID[] = SECRET_MQTT_CLIENT_ID;
+char mqttUserName[] = SECRET_MQTT_USERNAME;     
+char mqttPass[] = SECRET_MQTT_PASSWORD;         
+long channelID = 871658;                        // Change to your channel ID.
+
+MQTTClient mqttClient;
+const char* mqttServer = "mqtt3.thingspeak.com"; 
 unsigned long lastConnectionTime = 0L; 
 const unsigned long postingInterval = 20L * 1000L; // Post data every 20 seconds
 unsigned long mqttLoopTime = 0L;
-unsigned long mqttLoopDelay = 1000L;
+const unsigned long mqttLoopDelay = 500L;
 
 // OLED print settings
 // -------------------
@@ -87,31 +86,28 @@ unsigned long mqttLoopDelay = 1000L;
 #define OLED_RESET    -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 unsigned long displayNow = 0L;
-unsigned long displayDelay = 8000L;
+const unsigned long displayDelay = 8000L;
 
 // Serial print settings
 // --------------------
 unsigned long serial_time_now = 0L;
-unsigned long serial_delay = 2000L; // Serial print delay;
+const unsigned long serial_delay = 2000L; // Serial print delay;
+bool published = false;
 
 // mqtt reconnect function
 // -----------------------
 unsigned long mqttReconnectTime = 0L;
-unsigned long mqttReconnectInterval = 5000L;
+const unsigned long mqttReconnectInterval = 30000L;
+
+//timer for switching displayed info on screen (oled burn prevention...)
+unsigned long switchPosition = 0L;
+const unsigned long switchPositionDelay = 5000L;
 
 void reconnectMqtt() 
 {
-  char clientID[9];
   Serial.print("Attempting MQTT connection...");
-  // Generate ClientID
-  for (int i = 0; i < 8; i++) 
-  {
-    clientID[i] = alphanum[random(51)];
-  }
-  clientID[8]='\0';
-
   // Connect to the MQTT broker.
-  if (mqttClient.connect(clientID,mqttUserName,mqttPass))
+  if (mqttClient.connect(mqttClientID, mqttUserName, mqttPass))
   {
     Serial.println("connected");
   }
@@ -119,8 +115,7 @@ void reconnectMqtt()
   {
     Serial.print("failed, rc=");
     // Print reason the connection failed.
-    // See https://pubsubclient.knolleary.net/api.html#state for the failure code explanation.
-    Serial.print(mqttClient.state());
+    Serial.print(mqttClient.returnCode());
     Serial.print(" try again in ");
     Serial.print(mqttReconnectInterval/1000);
     Serial.println(" seconds.");
@@ -131,14 +126,18 @@ void reconnectMqtt()
 // ---------------------------------
 String password()
 {
-  char userAndPassword[] = "user:password";
+  char userAndPassword[] = "admin:admin";      //change these!!
   int inputStringLength = strlen(userAndPassword);
-  int encodedLength = Base64.encodedLength(inputStringLength);
-  char encodedString[encodedLength];
+  char encodedString[Base64.encodedLength(inputStringLength)];
   Base64.encode(encodedString, userAndPassword, inputStringLength);
   return(encodedString);
 }
 String myPass = password();
+
+const unsigned long wrongPassTimeout = 15000L;
+unsigned long wrongPassTimestamp = 0L;
+int authAttempt = 0;
+bool wrongPassFlag = false;
 
 // Web server
 // ---------
@@ -147,79 +146,18 @@ EthernetServer ethServer(80);
 File webPage;
 String header;
 
-void webServer()
-{
-  webClient = ethServer.available();
-  if (webClient) 
-  { 
-    Serial.println("New client");
-    boolean currentLineIsBlank = true;
-    while (webClient.connected()) 
-    {
-      if (webClient.available()) 
-      { 
-        char c = webClient.read(); 
-        header += c;
-
-        if (c == '\n' && currentLineIsBlank) 
-        {
-          Serial.print(header);
-          
-          //21 : "Authorization: Basic ".length()
-          int index = header.indexOf("Authorization: Basic ") + 21;
-          if ((index >= 21) && (header.substring(index, header.indexOf('\n', index) - 1) == myPass))
-          {
-            webClient.println("HTTP/1.1 200 OK");
-            webClient.println("Content-Type: text/html");
-            webClient.println("Connection: close");
-            webClient.println();
-            webPage = SD.open("index.htm");        
-            if (webPage) 
-            {
-              while (webPage.available()) 
-              {
-                webClient.write(webPage.read());
-              }
-              webPage.close();
-            }
-          } 
-          else 
-          {
-            // wrong user/pass
-            //client.println("HTTP/1.0 401 Authorization Required");
-            webClient.println("HTTP/1.1 401 Unauthorized");
-            webClient.println("WWW-Authenticate: Basic realm=\"Secure\"");
-            webClient.println("Content-Type: text/html");
-            webClient.println();
-            webClient.println("<html>No authorization.</html>"); // really need this for the popup!
-          }
-          header = "";
-          break;
-        }
-        if (c == '\n') {
-          currentLineIsBlank = true;
-        }
-        else if (c != '\r') {
-          currentLineIsBlank = false;
-        }
-      } 
-    } 
-    unsigned long pageDelay = millis();
-    while (millis() - pageDelay <= 1) {}  //instead of using delay (1)
-    webClient.stop(); 
-  }
-}
+int first_row, second_row, third_row = 0;
 
 void setup()
 {
   Serial.begin(115200);
 
   // Initialize Ethernet
-  Ethernet.begin(mac);
+  Ethernet.begin(mac, 5000UL, 2000UL);
   ethServer.begin();
-
+  
   // Initialize mqtt
-  mqttClient.setServer(mqttServer, 1883);   // Set the MQTT broker details.
+  mqttClient.begin(mqttServer, 1883, ethClient);    // Set the MQTT broker details.
 
   // Initialize SD Card
   Serial.println("Initializing SD card...");
@@ -270,24 +208,46 @@ void loop()
   display.clearDisplay();
   display.setTextColor(WHITE);
   display.setTextSize(1);
+
+  if (millis() <= switchPosition + switchPositionDelay)
+  {
+    first_row = 28;
+    second_row = 45;
+    third_row = 62;
+  }
+  else if (millis() > switchPosition + switchPositionDelay && millis() <= switchPosition + switchPositionDelay*2)
+  {
+    first_row = 45;
+    second_row = 62;
+    third_row = 28;
+  }
+  else if (millis() > switchPosition + switchPositionDelay*2 && millis() <= switchPosition + switchPositionDelay*3)
+  {
+    first_row = 62;
+    second_row = 28;
+    third_row = 45;
+  }
+  else
+    switchPosition = millis();
+  
   //Temperature
-  display.setCursor(0, 28);
+  display.setCursor(0, first_row);
   display.print("Temp: ");
-  display.setCursor(64, 28);
+  display.setCursor(64, first_row);
   display.print(tempCStr);
-  display.setCursor(116,28);
+  display.setCursor(116,first_row);
   display.print("C");
   //Humidity
-  display.setCursor(0, 45);
+  display.setCursor(0, second_row);
   display.print("Humid: ");
-  display.setCursor(64, 45);
+  display.setCursor(64, second_row);
   display.print(humidityStr);
-  display.setCursor(111, 45);
+  display.setCursor(111, second_row);
   display.print("%");
   //Pressure
-  display.setCursor(0, 62);
+  display.setCursor(0, third_row);
   display.print("Press: ");
-  display.setCursor(64, 62);
+  display.setCursor(64, third_row);
   display.print(pressureStr);
   // Display ThingSpeak status and IP Address on OLED screen
   if (millis() <= displayNow + displayDelay)
@@ -295,14 +255,15 @@ void loop()
     display.setCursor(0, 12);
     mqttClient.connected() ? display.print("ThingSpeak OK") : display.print("ThingSpeakN/A");  
   } 
-  else if (millis() > displayNow + displayDelay)
+  else
   {
     display.setCursor(0, 12);
+    display.print("IP:");
     display.print(Ethernet.localIP());
     if (millis() > displayNow + displayDelay*2)
       displayNow = millis();
   }
-
+  
   display.display();
 
   // Reconnect if MQTT client is not connected.
@@ -322,21 +283,27 @@ void loop()
   // Send data to thingspeak
   if (millis() > lastConnectionTime + postingInterval)
   {
-    // Create data string to send to ThingSpeak.
-    String data = String("field1=") + tempCStr + "&field2=" + humidityStr + "&field3=" + pressureStr + "&field4=" + hIndexCStr;
-    int length = data.length();
-    const char *msgBuffer;
-    msgBuffer=data.c_str();
-    Serial.println();
-    Serial.println(msgBuffer);
-    Serial.println();
-
     // Create a topic string and publish data to ThingSpeak channel feed. 
-    String topicString = "channels/" + String( channelID ) + "/publish/"+String(writeAPIKey);
-    length = topicString.length();
-    const char *topicBuffer;
-    topicBuffer = topicString.c_str();
-    mqttClient.publish( topicBuffer, msgBuffer );
+    String topic = "channels/" + String( channelID ) + "/publish";
+    Serial.println();
+    Serial.println(topic);
+    
+    // Create data string to send to ThingSpeak.
+    String data = String("field1=") + tempCStr + "&field2=" + humidityStr + "&field3=" + pressureStr + "&field4=" + hIndexCStr + "&status=MQTTPUBLISH";
+    Serial.println(data);
+
+    if (mqttClient.publish( topic, data ))
+      {
+        Serial.println("Publish OK");
+        published = true;
+      }
+    else
+      {
+        Serial.println("Pulbish Failed");
+        published = false;
+      }
+
+    Serial.println();
     lastConnectionTime = millis();
   }
 
@@ -353,6 +320,77 @@ void loop()
     serial_time_now = millis();
   }
   
-  webServer();
+  wrongPassFlag = millis() - wrongPassTimestamp < wrongPassTimeout;
 
+  webClient = ethServer.available();
+
+  if (webClient && wrongPassFlag == false)
+  { 
+    Serial.println("New client");
+    boolean currentLineIsBlank = true;
+    while (webClient.connected()) 
+    {
+      if (webClient.available()) 
+      { 
+        char c = webClient.read(); 
+        header += c;
+
+        if (c == '\n' && currentLineIsBlank) 
+        {
+          Serial.print(header);
+          
+          //21 : “Authorization: Basic “.length()
+          int index = header.indexOf("Authorization: Basic ") + 21;
+          if ((index >= 21) && (header.substring(index, header.indexOf('\n', index) - 1) == myPass))
+          {
+            webClient.println("HTTP/1.1 200 OK");
+            webClient.println("Content-Type: text/html");
+            webClient.println("Connection: close");
+            webClient.println();
+            authAttempt = 0;
+            webPage = SD.open("index.htm");        
+            if (webPage) 
+            {
+              while (webPage.available()) 
+              {
+                webClient.write(webPage.read());
+              }
+              webPage.close();
+            }
+          } 
+          else 
+          {
+            // wrong user/pass
+            //client.println("HTTP/1.0 401 Authorization Required");
+            webClient.println("HTTP/1.1 401 Unauthorized");
+            webClient.println("WWW-Authenticate: Basic realm=\"Secure\"");
+            webClient.println("Content-Type: text/html");
+            webClient.println();
+            webClient.println("<html><h1>No authorization.</h1>"); // really need this for the popup!
+            authAttempt += 1;
+            if (authAttempt >= 5)
+            {
+              wrongPassFlag = true;
+              wrongPassTimestamp = millis();
+              authAttempt = 0;
+              webClient.println("Login timeout: ");
+              webClient.print(wrongPassTimeout);
+            }
+            webClient.println("</html>");
+          }
+          header = "";
+          break;
+        }
+        if (c == '\n') {
+          currentLineIsBlank = true;
+        }
+        else if (c != '\r') {
+          currentLineIsBlank = false;
+        }
+      } 
+    } 
+    unsigned long pageDelay = millis();
+    while (millis() - pageDelay <= 1) {}  //instead of using delay (1)
+    webClient.stop(); 
+  }
 }
