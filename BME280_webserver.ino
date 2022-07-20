@@ -192,11 +192,14 @@ void setup()
   display.setFont(&FreeSans9pt7b);
 }
 
+const float elevation = 584.0;
+
 void loop()
 {
   float tempC = bme.readTemperature();
   float humidity = bme.readHumidity();
-  float pressure = bme.readPressure() / 100; 
+  //float pressure = bme.readPressure() / 100; 
+  float pressure = (((bme.readPressure())/pow((1-(elevation/44330)), 5.255))/100.0);
   float hIndex = (tempC * 1.8 + 32) - (0.55 - 0.0055 * humidity) * ((tempC * 1.8 + 32) - 58);
 
   String tempCStr = String(tempC, 2); // temperature (Celsius)
@@ -247,7 +250,7 @@ void loop()
   //Pressure
   display.setCursor(0, third_row);
   display.print("Press: ");
-  display.setCursor(64, third_row);
+  display.setCursor(62, third_row);
   display.print(pressureStr);
   // Display ThingSpeak status and IP Address on OLED screen
   if (millis() <= displayNow + displayDelay)
