@@ -212,19 +212,19 @@ void loop()
   display.setTextColor(WHITE);
   display.setTextSize(1);
 
-  if (millis() <= switchPosition + switchPositionDelay)
+  if (millis() - switchPosition <= switchPositionDelay)
   {
     first_row = 28;
     second_row = 45;
     third_row = 62;
   }
-  else if (millis() > switchPosition + switchPositionDelay && millis() <= switchPosition + switchPositionDelay*2)
+  else if (millis() - switchPosition > switchPositionDelay && millis() - switchPosition <= switchPositionDelay*2)
   {
     first_row = 45;
     second_row = 62;
     third_row = 28;
   }
-  else if (millis() > switchPosition + switchPositionDelay*2 && millis() <= switchPosition + switchPositionDelay*3)
+  else if (millis() - switchPosition > switchPositionDelay*2 && millis() - switchPosition <= switchPositionDelay*3)
   {
     first_row = 62;
     second_row = 28;
@@ -253,7 +253,7 @@ void loop()
   display.setCursor(62, third_row);
   display.print(pressureStr);
   // Display ThingSpeak status and IP Address on OLED screen
-  if (millis() <= displayNow + displayDelay)
+  if (millis() - displayNow <= displayDelay)
   {
     display.setCursor(0, 12);
     mqttClient.connected() ? display.print("ThingSpeak OK") : display.print("ThingSpeakN/A");  
@@ -263,28 +263,28 @@ void loop()
     display.setCursor(0, 12);
     display.print("IP:");
     display.print(Ethernet.localIP());
-    if (millis() > displayNow + displayDelay*2)
+    if (millis() - displayNow > displayDelay*2)
       displayNow = millis();
   }
   
   display.display();
 
   // Reconnect if MQTT client is not connected.
-  if (!mqttClient.connected() && millis() > mqttReconnectTime + mqttReconnectInterval) 
+  if (!mqttClient.connected() && millis() - mqttReconnectTime > mqttReconnectInterval) 
   {   
     reconnectMqtt();
     mqttReconnectTime = millis();
   }
 
   // Send loop() to ThingSpeak
-  if (millis() > mqttLoopTime + mqttLoopDelay)
+  if (millis() - mqttLoopTime > mqttLoopDelay)
   {
     mqttClient.loop();   
     mqttLoopTime = millis();
   }
 
   // Send data to thingspeak
-  if (millis() > lastConnectionTime + postingInterval)
+  if (millis() - lastConnectionTime >  postingInterval)
   {
     // Create a topic string and publish data to ThingSpeak channel feed. 
     String topic = "channels/" + String( channelID ) + "/publish";
@@ -311,7 +311,7 @@ void loop()
   }
 
   // Serial print
-  if (millis() > serial_time_now + serial_delay)
+  if (millis() - serial_time_now > serial_delay)
   {
     Serial.println("Temperature [C]: " + tempCStr);
     Serial.println("Humidity [%]: " + humidityStr);
